@@ -137,10 +137,10 @@ while($true)
 {
     Write-Host "Fab Log to Driver List to Product Tracker system starting up."
 
-    $DriveId = "470920482580356" 
-    $ptId    = "5779331080316804"
+    $DriveId = "" 
+    $ptId    = ""
     
-    $token      = "y5zp7dwarkblwsg4oam1f6it8y"
+    $token      = ""
     $smartsheet = [Smartsheet.Api.SmartSheetBuilder]::new()
     $builder    = $smartsheet.SetAccessToken($token)
     $client     = $builder.Build()
