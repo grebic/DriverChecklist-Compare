@@ -94,8 +94,6 @@ function Find-MatchingSku
                 
                 $QRdrive = (Get-FileHash $DriveQRPath).hash 
                 $QRpt = (Get-FileHash $PtQRPath).hash
-
-                $noParent = $false
                
                 if ($QRdrive -eq $QRpt)
                 {
