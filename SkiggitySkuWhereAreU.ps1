@@ -1,4 +1,4 @@
-﻿cd "P:\ANG_System_Files"
+cd "P:\ANG_System_Files"
 
 function Load-Dll
 {
@@ -30,6 +30,10 @@ function Get-ComparisonObjects
             PoCol = $_.Cells[0].ColumnId;
             Po = $_.Cells[0].Value;
             Parent = $_.ParentId;
+            ShippedCol = $_.Cells[10].ColumnId;
+            Shipped = $_.Cells[10].Value;
+            DestinationCol = $_.Cells[11].ColumnId;
+            Destination = $_.Cells[11].Value;
             SKUCol = $_.Cells[18].ColumnId;
             SKU = $_.Cells[18].Value;
 
@@ -72,93 +76,66 @@ function Get-DriverComparisonObjects
     return $data                                            
 }   
 
-function Find-MatchingSku
-{
-    foreach ($DriveCO in $DriveCOs)
-    {
-        $skuFound = $false
-
-        $driveQR = "$($DriveCO.PoNum)"
-        Out-File -FilePath "P:\ANG_System_Files\commonFormsUsedInScripts\QRcheck\driveQR.txt" -InputObject $driveQR
-
-        if ($DriveCO.Archive -eq $false)
-        {
-            foreach ($ptCO in $ptCOs)
-            {
-                $ptQR = "$($ptCO.SKU)"
-
-                Out-File -FilePath "P:\ANG_System_Files\commonFormsUsedInScripts\QRcheck\ptQR.txt" -InputObject $ptQR
-
-                $DriveQRPath = "P:\ANG_System_Files\commonFormsUsedInScripts\QRcheck\driveQR.txt"
-                $PtQRPath = "P:\ANG_System_Files\commonFormsUsedInScripts\QRcheck\ptQR.txt"
-                
-                $QRdrive = (Get-FileHash $DriveQRPath).hash 
-                $QRpt = (Get-FileHash $PtQRPath).hash
-               
-                if ($QRdrive -eq $QRpt)
-                {
-                    $skuFound = $true
-                    break
-                }
-            }
-                
-            if ($skuFound)
-            { 
-                if (![string]::IsNullOrWhiteSpace($DriveCO.PoNum) -and ![string]::IsNullOrWhiteSpace($ptCO.SKU))
-                {
-                    Write-Host "SKU found.  Updating data on PT."
-                    
-                    $destinationCell = [Smartsheet.Api.Models.Cell]::new()
-                    $destinationCell.ColumnId  = $ptDestinationCol.Id
-                    $destinationCell.Value     = "ITEM SCANNED TO ANG TRUCK"
-
-                    $shippedCell = [Smartsheet.Api.Models.Cell]::new()
-                    $shippedCell.ColumnId  = $ptShippedCol.Id
-                    $shippedCell.Value     = if ($DriveCO.Modified -ne $null){$DriveCO.Modified} else {[string]::Empty}
-
-                    $row = [Smartsheet.Api.Models.Row]::new()
-                    $row.Id = $ptCO.RowId
-                    $row.Cells = [Smartsheet.Api.Models.Cell[]]@($destinationCell, $shippedCell)
-
-                    $updateRow = $client.SheetResources.RowResources.UpdateRows($ptId, [Smartsheet.Api.Models.Row[]]@($row))
-                }
-            }
-        }
-    }
-}
-
 Write-Host "Loading Dlls"
 Load-Dll ".\smartsheet-csharp-sdk.dll"                     
 Load-Dll ".\RestSharp.dll"
 Load-Dll ".\Newtonsoft.Json.dll"
 Load-Dll ".\NLog.dll"
 
+$DriveId = "" 
+$ptId    = ""
+
+$token      = ""
+$smartsheet = [Smartsheet.Api.SmartSheetBuilder]::new()
+$builder    = $smartsheet.SetAccessToken($token)
+$client     = $builder.Build()
+$includes   =  @([Smartsheet.Api.Models.SheetLevelInclusion]::ATTACHMENTS)
+$includes   = [System.Collections.Generic.List[Smartsheet.Api.Models.SheetLevelInclusion]]$includes
+
+$driveSheet  = $client.SheetResources.GetSheet($DriveId, $includes, $null, $null, $null, $null, $null, $null);
+$ptSheet     = $client.SheetResources.GetSheet($ptId, $includes, $null, $null, $null, $null, $null, $null);
+    
 while($true)
 {
-    Write-Host "Fab Log to Driver List to Product Tracker system starting up."
+    $driveCOs  = Get-DriverComparisonObjects $driveSheet
+    $ptCOs     = Get-ComparisonObjects $ptSheet
 
-    $DriveId = "" 
-    $ptId    = ""
-    
-    $token      = ""
-    $smartsheet = [Smartsheet.Api.SmartSheetBuilder]::new()
-    $builder    = $smartsheet.SetAccessToken($token)
-    $client     = $builder.Build()
-    $includes   =  @([Smartsheet.Api.Models.SheetLevelInclusion]::ATTACHMENTS)
-    $includes   = [System.Collections.Generic.List[Smartsheet.Api.Models.SheetLevelInclusion]]$includes
-    
-    $Drive  = $client.SheetResources.GetSheet($DriveId, $includes, $null, $null, $null, $null, $null, $null);
-    $pt     = $client.SheetResources.GetSheet($ptId, $includes, $null, $null, $null, $null, $null, $null);
-    
-    $DriveCOs  = Get-DriverComparisonObjects $Drive
-    $ptCOs     = Get-ComparisonObjects $pt
-    
-    $ptDestinationCol = $pt.Columns | where {$_.Title -eq ("Destination")}
-    $ptShippedCol     = $pt.Columns | where {$_.Title -eq ("Shipped Date")}
-   
-   Find-MatchingSku 
+    Write-Host "Resuming"
+    Write-Host ""
 
-   Write-Host "Going to sleep."
-   
-   Start-Sleep -Seconds 10
+    $drives = $driveCOs | where {$_.PoNum -ne $null }    
+    $pts = $ptCOs| where {$_.Sku -ne $null } 
+    
+    foreach($pt in $pts) 
+    {
+        $matches = $drives | where {$_.PoNum -eq $pt.SKU} 
+        if($matches)
+        {
+            foreach ($match in $matches)
+            {
+                Write-Host $pt.SKU
+                write-host ""
+
+                $ptDestinationCol = $ptSheet.Columns | where {$_.Title -eq ("Destination")}
+                $ptShippedCol     = $ptSheet.Columns | where {$_.Title -eq ("Shipped Date")}
+
+                $destinationCell = [Smartsheet.Api.Models.Cell]::new()
+                $destinationCell.ColumnId  = $ptDestinationCol.Id
+                $destinationCell.Value     = "ITEM SCANNED TO ANG TRUCK"
+                
+                $shippedCell = [Smartsheet.Api.Models.Cell]::new()
+                $shippedCell.ColumnId  = $ptShippedCol.Id
+                $shippedCell.Value     = if ([string]::IsNullOrWhiteSpace($pt.Shipped)){Get-Date} else{$pt.Shipped}
+                
+                $row = [Smartsheet.Api.Models.Row]::new()
+                $row.Id = $pt.RowId
+                $row.Cells = [Smartsheet.Api.Models.Cell[]]@($destinationCell, $shippedCell)
+                
+                $updateRow = $client.SheetResources.RowResources.UpdateRows($ptId, [Smartsheet.Api.Models.Row[]]@($row))
+            }
+        }
+    }
+        
+    Write-Host "Pausing..."
+    Start-Sleep -Seconds 10
 }
