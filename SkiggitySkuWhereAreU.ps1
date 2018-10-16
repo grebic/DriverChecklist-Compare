@@ -1,5 +1,3 @@
-cd "P:\ANG_System_Files"
-
 function Load-Dll
 {
     param(
@@ -24,21 +22,14 @@ function Get-ComparisonObjects
     $data = $sheet.Rows | foreach {
         
         [pscustomobject]@{
-            Attachments = $_.Attachments;
+            
             RowId = $_.Id;
-            RowNumber = $_.RowNumber;
-            PoCol = $_.Cells[0].ColumnId;
-            Po = $_.Cells[0].Value;
-            Parent = $_.ParentId;
-            ShippedCol = $_.Cells[10].ColumnId;
-            Shipped = $_.Cells[10].Value;
-            DestinationCol = $_.Cells[11].ColumnId;
-            Destination = $_.Cells[11].Value;
-            SKUCol = $_.Cells[18].ColumnId;
-            SKU = $_.Cells[18].Value;
-
+            ModifiedCol = $_.Cells[16].ColumnId;
+            Modified = $_.Cells[16].Value;
+            QrCodeCol = $_.Cells[18].ColumnId;
+            QrCode = $_.Cells[18].Value;
         }                                                  
-    }| where {![string]::IsNullOrWhiteSpace($_.Po)}  
+    }| where {![string]::IsNullOrWhiteSpace($_.QrCode)}  
 
     Write-Host "$($data.Count) Returned"      
     return $data                                           
@@ -59,22 +50,54 @@ function Get-DriverComparisonObjects
             $archiveCheckVal = $true
         }
         [pscustomobject]@{
-            Attachments = $_.Attachments;
+            
             RowId = $_.Id;
-            RowNumber = $_.RowNumber;
-            Parent = $_.ParentId;
-            PoNumCol = $_.Cells[9].ColumnId;
-            PoNum = $_.Cells[9].Value;
+            QrCodeCol = $_.Cells[9].ColumnId;
+            QrCode = $_.Cells[9].Value;
             ModifiedCol = $_.Cells[10].ColumnId;
             Modified = $_.Cells[10].Value;
-            ArchiveCol = $_.Cells[11].ColumnId;
-            Archive = $archiveCheckVal;
         }                                                  
-    } | where {![string]::IsNullOrWhiteSpace($_.PoNum)}   
+    } | where {![string]::IsNullOrWhiteSpace($_.QrCode)}   
 
     Write-Host "$($data.Count) Returned"      
     return $data                                            
 }   
+
+function Merge-ComparisonObjectsWithProductTracker
+{
+    param([PSCustomObject[]]$COs, [string]$comment)
+
+    foreach($CO in $COs)
+    {
+        $matches = $pts | where {$_.QrCode -eq $CO.QrCode}
+
+        if($matches)
+        {
+            Write-Host ""
+            Write-Host $CO.QrCode
+
+            foreach ($match in $matches)
+            {
+                $ptDestinationCol = $ptSheet.Columns | where {$_.Title -eq ("Destination")}
+                $ptShippedCol     = $ptSheet.Columns | where {$_.Title -eq ("Shipped Date")}
+
+                $destinationCell = [Smartsheet.Api.Models.Cell]::new()
+                $destinationCell.ColumnId  = $ptDestinationCol.Id
+                $destinationCell.Value     = $comment
+                
+                $shippedCell = [Smartsheet.Api.Models.Cell]::new()
+                $shippedCell.ColumnId  = $ptShippedCol.Id
+                $shippedCell.Value     = if ([string]::IsNullOrWhiteSpace($match.Modified)){Get-Date} else{$match.Modified}
+                
+                $row = [Smartsheet.Api.Models.Row]::new()
+                $row.Id = $match.RowId
+                $row.Cells = [Smartsheet.Api.Models.Cell[]]@($destinationCell, $shippedCell)
+                
+                $updateRow = $client.SheetResources.RowResources.UpdateRows($ptId, [Smartsheet.Api.Models.Row[]]@($row))
+            }
+        }
+    }
+}
 
 Write-Host "Loading Dlls"
 Load-Dll ".\smartsheet-csharp-sdk.dll"                     
@@ -82,10 +105,12 @@ Load-Dll ".\RestSharp.dll"
 Load-Dll ".\Newtonsoft.Json.dll"
 Load-Dll ".\NLog.dll"
 
-$DriveId = "" 
-$ptId    = ""
+$DriveId = "470920482580356" 
+$ptId    = "5779331080316804"
+$4042Id     = "5258469793130372"
+$puyallupId = "2004636929419140"
 
-$token      = ""
+$token      = "y5zp7dwarkblwsg4oam1f6it8y"
 $smartsheet = [Smartsheet.Api.SmartSheetBuilder]::new()
 $builder    = $smartsheet.SetAccessToken($token)
 $client     = $builder.Build()
@@ -94,47 +119,30 @@ $includes   = [System.Collections.Generic.List[Smartsheet.Api.Models.SheetLevelI
 
 $driveSheet  = $client.SheetResources.GetSheet($DriveId, $includes, $null, $null, $null, $null, $null, $null);
 $ptSheet     = $client.SheetResources.GetSheet($ptId, $includes, $null, $null, $null, $null, $null, $null);
+$4042Sheet     = $client.SheetResources.GetSheet($4042Id, $includes, $null, $null, $null, $null, $null, $null);
+$puyallupSheet = $client.SheetResources.GetSheet($puyallupId, $includes, $null, $null, $null, $null, $null, $null);
+
+$ptDestinationCol = $pt.Columns | where {$_.Title -eq ("Destination")}
+$ptShippedCol     = $pt.Columns | where {$_.Title -eq ("Shipped Date")}
     
 while($true)
 {
-    $driveCOs  = Get-DriverComparisonObjects $driveSheet
-    $ptCOs     = Get-ComparisonObjects $ptSheet
+    $driveCOs    = Get-DriverComparisonObjects $driveSheet
+    $ptCOs       = Get-ComparisonObjects $ptSheet
+    $4042COs     = Get-ComparisonObjects $4042Sheet
+    $puyallupCOs = Get-ComparisonObjects $puyallupSheet
 
     Write-Host "Resuming"
     Write-Host ""
 
-    $drives = $driveCOs | where {$_.PoNum -ne $null }    
-    $pts = $ptCOs| where {$_.Sku -ne $null } 
+    $pts       = $ptCOs| where {$_.QrCode -like "BEGIN:VCARD*" } 
+    $drives    = $driveCOs | where {$_.QrCode -like "BEGIN:VCARD*" }  
+    $4042s     = $4042COs| where {$_.QrCode -like "BEGIN:VCARD*" } 
+    $puyallups = $puyallupCOs | where {$_.QrCode -like "BEGIN:VCARD*" }  
     
-    foreach($pt in $pts) 
-    {
-        $matches = $drives | where {$_.PoNum -eq $pt.SKU} 
-        if($matches)
-        {
-            foreach ($match in $matches)
-            {
-                Write-Host $pt.SKU
-                write-host ""
-
-                $ptDestinationCol = $ptSheet.Columns | where {$_.Title -eq ("Destination")}
-                $ptShippedCol     = $ptSheet.Columns | where {$_.Title -eq ("Shipped Date")}
-
-                $destinationCell = [Smartsheet.Api.Models.Cell]::new()
-                $destinationCell.ColumnId  = $ptDestinationCol.Id
-                $destinationCell.Value     = "ITEM SCANNED TO ANG TRUCK"
-                
-                $shippedCell = [Smartsheet.Api.Models.Cell]::new()
-                $shippedCell.ColumnId  = $ptShippedCol.Id
-                $shippedCell.Value     = if ([string]::IsNullOrWhiteSpace($pt.Shipped)){Get-Date} else{$pt.Shipped}
-                
-                $row = [Smartsheet.Api.Models.Row]::new()
-                $row.Id = $pt.RowId
-                $row.Cells = [Smartsheet.Api.Models.Cell[]]@($destinationCell, $shippedCell)
-                
-                $updateRow = $client.SheetResources.RowResources.UpdateRows($ptId, [Smartsheet.Api.Models.Row[]]@($row))
-            }
-        }
-    }
+    Merge-ComparisonObjectsWithProductTracker -COs $drives -comment "ITEM SCANNED TO ANG TRUCK FOR FIELD"
+    Merge-ComparisonObjectsWithProductTracker -COs $4042s -comment "ITEM SCANNED TO 4042 WAREHOUSE"
+    Merge-ComparisonObjectsWithProductTracker -COs $puyallups -comment "ITEM SCANNED TO PUYALLUP WAREHOUSE"
         
     Write-Host "Pausing..."
     Start-Sleep -Seconds 10
