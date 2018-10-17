@@ -159,12 +159,12 @@ while($true)
     Load-Dll ".\Newtonsoft.Json.dll"
     Load-Dll ".\NLog.dll"
     
-    $DriveId    = "470920482580356" 
-    $ptId       = "5779331080316804"
-    $4042Id     = "5258469793130372"
-    $puyallupId = "2004636929419140"
+    $DriveId    = "" 
+    $ptId       = ""
+    $4042Id     = ""
+    $puyallupId = ""
     
-    $token      = "j2gyx9j3zj5bh0s2fiv0jnni03"
+    $token      = ""
     $smartsheet = [Smartsheet.Api.SmartSheetBuilder]::new()
     $builder    = $smartsheet.SetAccessToken($token)
     $client     = $builder.Build()
